@@ -1,36 +1,241 @@
 # DATAPAIR SERVER
-Version 1
+Version 2.0 - QuestDB Edition
 ---
 
-Start the server:
+High-performance market data server with **QuestDB** backend for Level 3 MBO (Market By Order) data.
+
+## Quick Start
 
 ```shell
-cargo run
+# Build the server
+cargo build --release
+
+# Start everything (QuestDB → Server → Newt tunnel)
+.\start.bat
+
+# Or run manually
+set QUESTDB_URL=http://localhost:9000
+cargo run --release
 ```
 
-### Endpoint: /data
+Server runs on `http://127.0.0.1:8080` and queries QuestDB on `http://localhost:9000`.
 
-Takes in start_ts and end_ts timestamps. Then returns the L3 data for NVDA during that time.
+---
 
+## API Endpoints
+
+### 📊 Level-of-Detail (LOD) MBO API
+
+#### GET `/api/mbo/bars` - OHLCV Aggregated Bars
+
+Returns OHLCV bars for a symbol over a time range with automatic resolution adjustment.
+
+**Query Parameters:**
+- `symbol` (string, required) - Ticker symbol (e.g., "NVDA", "AAPL")
+- `start` (string, required) - Start time (ISO 8601 or date: "2025-10-22" or "2025-10-22T09:30:00Z")
+- `end` (string, required) - End time (ISO 8601 or date)
+- `resolution` (string, required) - Bar interval: `"1s"`, `"10s"`, `"1m"`, `"5m"`, `"15m"`, `"1h"`, `"1d"`, or `"auto"`
+
+**Headers:**
+- `Accept: application/json` (default) - Returns JSON response
+- `Accept: application/vnd.apache.arrow.stream` - Returns Apache Arrow IPC stream (for high-performance clients)
+
+**Example:**
 ```shell
-curl -X POST http://127.0.0.1:8080/data -H "Content-Type: application/json" -d '{"start_ts": 1761130860000000000, "end_ts": 1761130920000000000}' -o output.json
+# Get 5-minute bars for NVDA on Oct 22, 2025
+curl "http://127.0.0.1:8080/api/mbo/bars?symbol=NVDA&start=2025-10-22&end=2025-10-23&resolution=5m"
+
+# Get bars with Arrow format (zero-copy deserialization)
+curl -H "Accept: application/vnd.apache.arrow.stream" \
+  "http://127.0.0.1:8080/api/mbo/bars?symbol=AAPL&start=2025-10-22T09:30:00Z&end=2025-10-22T16:00:00Z&resolution=1m" \
+  -o bars.arrow
 ```
 
-### Endpoint: /time/to_timestamp
+**Response (JSON):**
+```json
+{
+  "symbol": "NVDA",
+  "resolution": "5m",
+  "count": 78,
+  "bars": [
+    {
+      "ts_event": "2025-10-22T09:30:00Z",
+      "open": 135.42,
+      "high": 135.89,
+      "low": 135.21,
+      "close": 135.67,
+      "volume": 125430,
+      "trades": 342
+    }
+  ]
+}
+```
 
-Takes in human readable time and converts it to datetime
+---
 
+#### GET `/api/mbo/ticks` - Raw Tick Data
+
+Returns individual tick-level MBO events for fine-grained analysis.
+
+**Query Parameters:**
+- `symbol` (string, required) - Ticker symbol
+- `start` (string, required) - Start time (ISO 8601)
+- `end` (string, required) - End time (ISO 8601)
+- `limit` (int, optional, default=10000, max=50000) - Max ticks to return
+- `offset` (int, optional, default=0) - Pagination offset
+
+**Headers:**
+- `Accept: application/json` or `application/vnd.apache.arrow.stream`
+
+**Example:**
 ```shell
-curl -s -X POST http://127.0.0.1:8080/time/to_timestamp -H "Content-Type: application/json" -d '{"datetime": "2025-10-22 11:01:00"}' | jq .
+# Get first 5000 ticks for TSLA
+curl "http://127.0.0.1:8080/api/mbo/ticks?symbol=TSLA&start=2025-10-22T09:30:00Z&end=2025-10-22T09:31:00Z&limit=5000"
+
+# Paginate through ticks
+curl "http://127.0.0.1:8080/api/mbo/ticks?symbol=TSLA&start=2025-10-22T09:30:00Z&end=2025-10-22T09:35:00Z&limit=10000&offset=10000"
 ```
 
-### Endpoint: /time/to_datetime
+**Response (JSON):**
+```json
+{
+  "symbol": "TSLA",
+  "count": 5000,
+  "has_more": true,
+  "ticks": [
+    {
+      "ts_event": "2025-10-22T09:30:00.123456789Z",
+      "price": 234.56,
+      "size": 100,
+      "side": "B",
+      "action": "A",
+      "order_id": 1234567890
+    }
+  ]
+}
+```
 
-Takes in datetime and converts it back to human readable format
+---
 
+#### GET `/api/mbo/symbols` - List Available Symbols
+
+Returns all distinct symbols in the database.
+
+**Example:**
 ```shell
-curl -s -X POST http://127.0.0.1:8080/time/to_datetime -H "Content-Type: application/json" -d '{"timestamp_ns": 1761130860010235508}' | jq .
+curl "http://127.0.0.1:8080/api/mbo/symbols"
 ```
+
+**Response:**
+```json
+{
+  "symbols": ["AAPL", "GOOGL", "MSFT", "NVDA", "TSLA", ...]
+}
+```
+
+---
+
+#### GET `/api/mbo/range` - Data Availability Range
+
+Returns the time range of available data for a symbol.
+
+**Query Parameters:**
+- `symbol` (string, optional, default="NVDA") - Ticker symbol
+
+**Example:**
+```shell
+curl "http://127.0.0.1:8080/api/mbo/range?symbol=AAPL"
+```
+
+**Response:**
+```json
+{
+  "symbol": "AAPL",
+  "min_ts": "2025-10-22T09:30:00.000000000Z",
+  "max_ts": "2025-10-22T16:00:00.000000000Z",
+  "count": 15234567
+}
+```
+
+---
+
+### 🕐 Utility Endpoints
+
+#### POST `/time/to_timestamp` - Convert DateTime to Nanosecond Timestamp
+
+**Request Body:**
+```json
+{
+  "datetime": "2025-10-22 11:01:00"
+}
+```
+
+**Example:**
+```shell
+curl -X POST http://127.0.0.1:8080/time/to_timestamp \
+  -H "Content-Type: application/json" \
+  -d '{"datetime": "2025-10-22 11:01:00"}' | jq .
+```
+
+**Response:**
+```json
+{
+  "timestamp_ns": 1761130860000000000,
+  "datetime_utc": "2025-10-22T11:01:00Z"
+}
+```
+
+---
+
+#### POST `/time/to_datetime` - Convert Nanosecond Timestamp to DateTime
+
+**Request Body:**
+```json
+{
+  "timestamp_ns": 1761130860010235508
+}
+```
+
+**Example:**
+```shell
+curl -X POST http://127.0.0.1:8080/time/to_datetime \
+  -H "Content-Type: application/json" \
+  -d '{"timestamp_ns": 1761130860010235508}' | jq .
+```
+
+**Response:**
+```json
+{
+  "timestamp_ns": 1761130860010235508,
+  "datetime_utc": "2025-10-22T11:01:00.010235508Z"
+}
+```
+
+---
+
+### 🔧 Legacy Endpoints
+
+#### POST `/data` - Raw L3 Data (Deprecated)
+
+Returns raw MBO data for NVDA between timestamps. **Use `/api/mbo/ticks` instead.**
+
+**Request Body:**
+```json
+{
+  "start_ts": 1761130860000000000,
+  "end_ts": 1761130920000000000
+}
+```
+
+**Example:**
+```shell
+curl -X POST http://127.0.0.1:8080/data \
+  -H "Content-Type: application/json" \
+  -d '{"start_ts": 1761130860000000000, "end_ts": 1761130920000000000}' \
+  -o output.json
+```
+
+---
 
 ## QuestDB ingestion
 
