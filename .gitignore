@@ -1,0 +1,17 @@
+/target
+/data
+/parquet
+/questdb-9.2.3-rt-windows-x86-64
+ARCHITECTURE.md
+CONVERSION_BOTTLENECK.md
+PERFORMANCE.md
+SYMBOLS.txt
+convert_parallel.sh
+pangolin_log.txt
+QUESTDB_E_DRIVE.md
+run_ingest.ps1
+setup_questdb_e_drive.ps1
+setup_questdb_e_drive.sh
+newt_windows_amd64.exe
+.env
+start.bat

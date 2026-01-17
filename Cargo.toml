@@ -1,0 +1,24 @@
+[package]
+name = "pc-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4"
+chrono = { version = "0.4", features = ["serde"] }
+databento = "0.36.0"
+dbn = { version = "0.44.0", features = ["serde", "async"] }
+# duckdb = { version = "1.1", features = ["bundled"] }
+futures = "0.3"
+questdb-rs = "6.1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "json"] }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
+polars = { version = "0.46", features = ["parquet", "lazy", "dtype-datetime", "sql", "dynamic_group_by", "json"] }
+clap = { version = "4", features = ["derive"] }
+arrow = { version = "54", features = ["ipc"] }
+arrow-ipc = "54"
+urlencoding = "2"
+regex = "1"
